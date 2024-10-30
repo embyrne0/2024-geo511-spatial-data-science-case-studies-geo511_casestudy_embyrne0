@@ -1,0 +1,122 @@
+---
+title: "Case_Study9"
+output: html_document
+date: "2024-10-29"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+
+# Step 1
+  # download the needed packages 
+# install.packages('ggmap')
+# Step 1: Download the required packages/libraries 
+library(sf)
+library(tidyverse)
+library(ggmap)
+library(spData)
+library(lubridate)
+data(world)
+data(us_states)
+```
+
+```{r}
+# Step 2:  download storm track data from NOAA, 
+    # make a summary plot, and quantify how many storms have hit each of the United States
+
+# Download a csv from noaa with storm track information
+dataurl="https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.NA.list.v04r01.csv"
+
+# read the dataurl data 
+storm_data <- read_csv(dataurl, show_col_types = FALSE) # use read_csv and ignore the show_col_types
+```
+
+```{r}
+# Step 3: Next, Wrangle the data
+  # # Create a new column with just the year
+storm_data <- storm_data %>%
+  mutate(year = year(ISO_TIME)) %>%
+  filter(year >= 1950) %>% # Filter to storms 1950-present 
+  mutate_if(is.numeric, function(x) ifelse(x == -999.0, NA, x)) %>% # Convert -999.0 to NA
+  # the -999.0 has been used in datasets as a placeholder for missing or undefined data. There are a few other variations 
+  mutate(decade = (floor(year / 10) * 10)) # Add a column for decade
+
+# convert to sf 
+sf_stormdata <- storm_data %>%
+  filter(!is.na(LAT) & !is.na(LON)) %>% # Remove rows that are missing coords 
+  st_as_sf(coords = c("LON", "LAT"), crs = 4326, remove = FALSE)
+  # EPSG:4326 Geodetic coordinate system
+
+region <- st_bbox(sf_stormdata)
+print(region) # this is the bbox, the boundary/shapefile 
+```
+```{r}
+# This is for the ggplot 
+  # use the world plot 
+ggplot(data = world) + # Plot the world map as the base layer
+  geom_sf() +
+  stat_bin2d(data = sf_stormdata, 
+             aes(x = st_coordinates(sf_stormdata)[, 1], 
+                 y = st_coordinates(sf_stormdata)[, 2]), 
+             bins = 100) +  # Add storm data
+  facet_wrap(~decade) +  # Create separate panels for each decade
+  scale_fill_distiller(palette = "YlOrRd", trans = "log", direction = -1, 
+                       breaks = c(1, 10, 100, 1000)) + # set the color ramp
+  coord_sf(ylim = region[c(2, 4)], xlim = region[c(1, 3)]) + #  crop the plot to the region
+  labs(title = "Storm Tracks by Decade", # Label
+       x = "Longitude", # x-axis
+       y = "Latitude", #y-axis 
+       fill = "Storm Count") + # the legend 
+  theme_minimal()
+```
+
+```{r}
+
+# Step 4
+  # Calculate table of the five states with most storms. 
+  # They will be Florida, NC, Georgie, Texas, and Louisiana
+
+us_states_sf <- st_as_sf(us_states) # from the data(us_states)
+us_states_sf <- st_transform(us_states_sf, st_crs(sf_stormdata)) # from the sf_stormdata, use the st_transform
+
+# Rename the NAME column to state 
+us_states_sf <- us_states_sf %>%
+  select(state = NAME)
+
+# Do a spatial join 
+storm_states <- st_join(sf_stormdata, us_states_sf, join = st_intersects, left = FALSE)
+
+# Count the number of unique storms per state of the storm_states
+storm_counts <- storm_states %>%
+  group_by(state) %>%
+  summarize(storms = length(unique(NAME))) %>%
+  arrange(desc(storms))
+
+# Get the top 5 states with the most storms
+states_5 <- storm_counts %>%
+  slice(1:5) # starts from 1 and goes to 5
+
+# Print the top 5 states
+print(states_5)
+```
+
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
